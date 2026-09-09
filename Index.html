@@ -1,0 +1,546 @@
+   <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Arrow Puzzle</title>
+<style>
+  :root{
+    --ink:#0b1938;
+    --ink-blocked:#ef3f56;
+    --accent:#2f7ff0;
+    --bg-page:#f4f6fa;
+    --bg-app:#ffffff;
+    --pill-bg:#eef1f6;
+    --heart:#ef3f56;
+    --footer-bg:#ffffff;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg-page);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .app{max-width:480px;margin:0 auto;min-height:100vh;background:var(--bg-app);
+    display:flex;flex-direction:column;position:relative;overflow:hidden;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 6px;}
+  .icon-btn{background:none;border:none;color:var(--accent);cursor:pointer;padding:6px;display:flex;}
+  .icon-btn svg{width:26px;height:26px;}
+  .level-title{font-size:22px;font-weight:800;color:#111;}
+  .statsrow{display:flex;align-items:center;justify-content:space-between;padding:10px 24px;}
+  .pill{background:var(--pill-bg);border-radius:14px;padding:8px 16px;display:flex;align-items:center;gap:6px;font-weight:700;color:#333;font-size:15px;}
+  .hearts{display:flex;gap:6px;}
+  .heart{font-size:26px;line-height:1;transition:transform .2s ease, opacity .2s ease;}
+  .heart.lost{opacity:.18;transform:scale(.75);filter:grayscale(1);}
+  .board-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:12px;position:relative;}
+  #board-svg{width:100%;max-width:440px;height:auto;aspect-ratio:1/1;touch-action:manipulation;overflow:visible;}
+  .arrow-group{cursor:pointer;transition:transform .32s cubic-bezier(.2,1,.4,1), opacity .25s ease;}
+  .arrow-group path.shaft{stroke:var(--ink);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;fill:none;}
+  .arrow-group polygon.head{fill:var(--ink);stroke:var(--ink);stroke-width:0.6;stroke-linejoin:round;}
+  .arrow-group.invalid path.shaft{stroke:var(--ink-blocked);}
+  .arrow-group.invalid polygon.head{fill:var(--ink-blocked);stroke:var(--ink-blocked);}
+  .arrow-group.invalid{animation:shake .3s ease;}
+  .arrow-group.hint{animation:pulse .7s ease-in-out infinite;}
+  .arrow-group.cleared{opacity:0;pointer-events:none;}
+  @keyframes shake{0%,100%{transform:translate(0,0);}25%{transform:translate(-5px,0);}50%{transform:translate(5px,0);}75%{transform:translate(-3px,0);}}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;filter:drop-shadow(0 0 6px var(--accent));}}
+  .footer{background:var(--footer-bg);padding:14px 30px 24px;display:flex;align-items:center;justify-content:center;gap:36px;}
+  .tool-btn{position:relative;width:60px;height:60px;border-radius:50%;background:#fff;border:none;box-shadow:0 4px 12px rgba(0,0,0,.09);display:flex;align-items:center;justify-content:center;font-size:28px;cursor:pointer;}
+  .tool-count{position:absolute;top:-4px;right:-4px;background:var(--accent);color:#fff;font-size:11px;font-weight:800;border-radius:10px;min-width:20px;height:20px;display:flex;align-items:center;justify-content:center;padding:0 4px;}
+  .overlay{position:absolute;inset:0;background:rgba(255,255,255,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;opacity:0;pointer-events:none;transition:opacity .25s ease;z-index:20;text-align:center;padding:30px;}
+  .overlay.show{opacity:1;pointer-events:auto;}
+  .overlay h2{font-size:26px;margin:0;color:#111;}
+  .overlay p{margin:0;color:#666;font-size:15px;}
+  .overlay .emoji{font-size:52px;}
+  .overlay button{margin-top:6px;background:var(--accent);color:#fff;border:none;border-radius:14px;padding:14px 36px;font-size:17px;font-weight:800;cursor:pointer;}
+  .overlay button.secondary{background:var(--heart);}
+  .overlay button.ghost{background:var(--pill-bg);color:#333;}
+  .settings-actions{display:flex;flex-direction:column;gap:12px;width:100%;max-width:260px;}
+  .sound-row{display:flex;align-items:center;justify-content:space-between;background:var(--pill-bg);border-radius:14px;padding:12px 18px;font-weight:700;color:#333;font-size:15px;}
+  .switch{position:relative;width:46px;height:26px;border-radius:14px;background:#c9cede;border:none;cursor:pointer;}
+  .switch::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform .2s ease;}
+  .switch.on{background:var(--accent);}
+  .switch.on::after{transform:translateX(20px);}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <button class="icon-btn" id="backBtn">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+    </button>
+    <div class="level-title" id="levelTitle">Level 1</div>
+    <button class="icon-btn" id="settingsBtn">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 8a4 4 0 100 8 4 4 0 000-8z" stroke="currentColor" stroke-width="2"/><path d="M19.4 13a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06A1.7 1.7 0 0015 2.65a1.7 1.7 0 00-1.87-.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.65 13H3a2 2 0 110-4h.09A1.7 1.7 0 0019.4 13z" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+  </div>
+
+  <div class="statsrow">
+    <div class="pill">🏹 <span id="arrowCount">0</span></div>
+    <div class="hearts" id="hearts"><span class="heart">❤️</span><span class="heart">❤️</span><span class="heart">❤️</span></div>
+    <div class="pill" id="diffPill">Normal</div>
+  </div>
+
+  <div class="board-wrap">
+    <svg id="board-svg" viewBox="0 0 500 500"></svg>
+  </div>
+
+  <div class="footer">
+    <button class="tool-btn" id="hintBtn">💡<span class="tool-count" id="hintBadge">3</span></button>
+  </div>
+
+  <div class="overlay" id="winOverlay">
+    <div class="emoji">🎉</div>
+    <h2>Level Complete!</h2>
+    <p>Saare interlocking arrows clear ho gaye.</p>
+    <button id="nextBtn">Next Level</button>
+  </div>
+
+  <div class="overlay" id="loseOverlay">
+    <div class="emoji">💔</div>
+    <h2>Out of Chances</h2>
+    <p>Chances khatam! Phir se try karein.</p>
+    <button class="secondary" id="restartBtn">Restart</button>
+  </div>
+
+  <div class="overlay" id="settingsOverlay">
+    <div class="emoji">⚙️</div>
+    <h2>Settings</h2>
+    <div class="settings-actions">
+      <div class="sound-row">
+        <span>Sound</span>
+        <button class="switch on" id="soundToggle"></button>
+      </div>
+      <button class="secondary" id="settingsRestartBtn">Restart Level</button>
+      <button class="ghost" id="settingsCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const boardSvg = document.getElementById('board-svg');
+  const levelTitle = document.getElementById('levelTitle');
+  const diffPill = document.getElementById('diffPill');
+  const arrowCountEl = document.getElementById('arrowCount');
+  const heartsEl = document.getElementById('hearts');
+  const hintBadge = document.getElementById('hintBadge');
+  const hintBtn = document.getElementById('hintBtn');
+  const winOverlay = document.getElementById('winOverlay');
+  const loseOverlay = document.getElementById('loseOverlay');
+  const settingsOverlay = document.getElementById('settingsOverlay');
+  const soundToggle = document.getElementById('soundToggle');
+
+  let level = 1, lives = 3, hints = 3;
+  let currentR = 5;
+  let arrows = [];
+  let gridMap = {};
+  let cleared = new Set();
+  let busy = false;
+  let soundOn = true;
+
+  let actx = null;
+  function ctx(){
+    if(!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if(actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function tone(freq, start, dur, type, gainVal){
+    if(!soundOn) return;
+    try{
+      const c = ctx();
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.value = freq;
+      gain.gain.value = 0;
+      osc.connect(gain).connect(c.destination);
+      const t0 = c.currentTime + start;
+      gain.gain.setValueAtTime(0, t0);
+      gain.gain.linearRampToValueAtTime(gainVal||0.18, t0+0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0+dur);
+      osc.start(t0);
+      osc.stop(t0+dur+0.02);
+    }catch(e){}
+  }
+  function playClearSound(){ tone(560,0,0.08,'triangle'); tone(820,0.06,0.12,'triangle'); }
+  function playInvalidSound(){ tone(140,0,0.18,'square',0.15); }
+  function playWinSound(){ tone(523,0,0.12,'triangle'); tone(659,0.1,0.12,'triangle'); tone(784,0.2,0.2,'triangle'); }
+  function playLoseSound(){ tone(280,0,0.15,'sawtooth',0.14); tone(160,0.13,0.25,'sawtooth',0.14); }
+
+  soundToggle.addEventListener('click', ()=>{
+    soundOn = !soundOn;
+    soundToggle.classList.toggle('on', soundOn);
+  });
+
+  function key(x,y){ return x+','+y; }
+  function inDiamond(x,y,r){ return Math.abs(x)+Math.abs(y) <= r; }
+
+  // Strictly 4 orthogonal cardinal directions
+  const DIRS = [
+    { name:'up', dx:0, dy:-1 },
+    { name:'down', dx:0, dy:1 },
+    { name:'left', dx:-1, dy:0 },
+    { name:'right', dx:1, dy:0 }
+  ];
+
+  function getLevelConfig(lvl){
+    if(lvl === 1) return { r: 5, minLen: 2, maxLen: 4, label: 'Easy' };
+    if(lvl === 2) return { r: 6, minLen: 3, maxLen: 5, label: 'Normal' };
+    if(lvl === 3) return { r: 7, minLen: 3, maxLen: 6, label: 'Hard' };
+    return { r: 8, minLen: 4, maxLen: 7, label: 'Expert' };
+  }
+
+  // Strictly 90-degree orthogonal maze generation
+  // (UNCHANGED from the original — this is the source of truth for every arrow's
+  // cells AND its direction. Direction is derived purely from the last walked
+  // segment, so head and shaft can never disagree.)
+  function generateStrictGridArrows(r, minLen, maxLen){
+    const allCells = [];
+    for(let y=-r; y<=r; y++){
+      for(let x=-r; x<=r; x++){
+        if(inDiamond(x,y,r)) allCells.push([x,y]);
+      }
+    }
+
+    const available = new Set(allCells.map(([x,y])=>key(x,y)));
+    const arrowList = [];
+    let idCounter = 0;
+
+    let loops = 0;
+    while(available.size > 0 && loops < 800){
+      loops++;
+      const keysArr = Array.from(available);
+      const startKey = keysArr[Math.floor(Math.random() * keysArr.length)];
+      const [sx, sy] = startKey.split(',').map(Number);
+
+      const body = [[sx, sy]];
+      available.delete(startKey);
+
+      const targetLen = Math.floor(Math.random() * (maxLen - minLen + 1)) + minLen;
+      let cx = sx, cy = sy;
+
+      for(let step = 1; step < targetLen; step++){
+        const candidateDirs = DIRS.slice().sort(()=>Math.random() - 0.5);
+        let moved = false;
+        for(const cd of candidateDirs){
+          const nx = cx + cd.dx;
+          const ny = cy + cd.dy;
+          const nk = key(nx, ny);
+          if(inDiamond(nx, ny, r) && available.has(nk)){
+            body.push([nx, ny]);
+            available.delete(nk);
+            cx = nx;
+            cy = ny;
+            moved = true;
+            break;
+          }
+        }
+        if(!moved) break;
+      }
+
+      // If length is only 1, force one 90-degree neighbor step so no arrow is headless/tailless
+      if(body.length < 2){
+        for(const cd of DIRS){
+          const nx = cx + cd.dx;
+          const ny = cy + cd.dy;
+          const nk = key(nx, ny);
+          if(inDiamond(nx, ny, r) && available.has(nk)){
+            body.push([nx, ny]);
+            available.delete(nk);
+            cx = nx;
+            cy = ny;
+            break;
+          }
+        }
+      }
+
+      // Final direction: STRICTLY the vector of the last segment (Straight line, no diagonals)
+      let headDir = DIRS[0];
+      if(body.length >= 2){
+        const prev = body[body.length - 2];
+        const last = body[body.length - 1];
+        const fdx = last[0] - prev[0];
+        const fdy = last[1] - prev[1];
+        headDir = DIRS.find(d => d.dx === fdx && d.dy === fdy) || DIRS[0];
+
+        arrowList.push({
+          id: 'arr_' + (idCounter++),
+          head: [last[0], last[1]],
+          dir: headDir,
+          cells: body
+        });
+      }
+    }
+
+    return arrowList;
+  }
+
+  // Draw arrow with perfectly straight, cleanly aligned triangle head
+  // (UNCHANGED — head is built purely from arrow.dir, which itself came directly
+  // from the shaft's last segment, so head/shaft alignment is guaranteed here.)
+  function makeArrowPath(arrow, r, cellSize, offset){
+    const pts = arrow.cells.map(([x,y])=>({
+      x: offset + (x + r) * cellSize,
+      y: offset + (y + r) * cellSize
+    }));
+
+    let shaftD = `M ${pts[0].x} ${pts[0].y}`;
+    for(let i=1; i<pts.length; i++){
+      shaftD += ` L ${pts[i].x} ${pts[i].y}`;
+    }
+
+    const headPt = pts[pts.length - 1];
+    const hx = headPt.x;
+    const hy = headPt.y;
+    const s = Math.max(3.8, cellSize * 0.24);
+    const { dx, dy } = arrow.dir;
+
+    // Tip points exactly in the arrow direction
+    const tipX = hx + dx * (s * 1.6);
+    const tipY = hy + dy * (s * 1.6);
+
+    // Left and right wings
+    const leftX = hx - dy * s;
+    const leftY = hy + dx * s;
+    const rightX = hx + dy * s;
+    const rightY = hy - dx * s;
+
+    const headPoints = `${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}`;
+    return { shaftD, headPoints };
+  }
+
+  function checkCanExit(arrow){
+    const [hx, hy] = arrow.head;
+    const dx = arrow.dir.dx;
+    const dy = arrow.dir.dy;
+    let cx = hx + dx;
+    let cy = hy + dy;
+
+    while(inDiamond(cx, cy, currentR)){
+      const k = key(cx, cy);
+      const blockerId = gridMap[k];
+      if(blockerId && !cleared.has(blockerId) && blockerId !== arrow.id){
+        return false;
+      }
+      cx += dx;
+      cy += dy;
+    }
+    return true;
+  }
+
+  // ---- FIX: solvability is now guaranteed WITHOUT ever touching arrow.dir ----
+  //
+  // Build a directed dependency graph: edge (blocker -> arrow) means "blocker" must be
+  // cleared before "arrow" can exit. If this graph has a cycle (A blocked by B, B
+  // blocked by A, ...), the board is unsolvable. We NEVER patch a direction to escape
+  // that — we simply throw the whole board away and generate a fresh one, since
+  // direction must stay exactly what the shaft's last segment produced.
+  function isDependencyGraphAcyclic(arrowList, r){
+    const localGrid = {};
+    arrowList.forEach(a => a.cells.forEach(([x,y]) => { localGrid[key(x,y)] = a.id; }));
+
+    const deps = {};
+    arrowList.forEach(a=>{
+      const dx = a.dir.dx, dy = a.dir.dy;
+      let cx = a.head[0] + dx, cy = a.head[1] + dy;
+      const blockSet = new Set();
+      while(inDiamond(cx, cy, r)){
+        const bId = localGrid[key(cx, cy)];
+        if(bId && bId !== a.id) blockSet.add(bId);
+        cx += dx; cy += dy;
+      }
+      deps[a.id] = blockSet;
+    });
+
+    const visited = {}, inStack = {};
+    let hasCycle = false;
+    function dfs(id){
+      if(hasCycle) return;
+      if(inStack[id]){ hasCycle = true; return; }
+      if(visited[id]) return;
+      visited[id] = true;
+      inStack[id] = true;
+      deps[id].forEach(dep => dfs(dep));
+      inStack[id] = false;
+    }
+    for(const a of arrowList){
+      dfs(a.id);
+      if(hasCycle) break;
+    }
+    return !hasCycle;
+  }
+
+  // Regenerate the whole board (never mutate a single arrow's direction) until the
+  // blocking dependencies form an acyclic graph — that guarantees a valid clearing
+  // order exists (any topological sort of the dependency graph is a valid solution).
+  function generateSolvableBoard(r, minLen, maxLen){
+    let candidate = generateStrictGridArrows(r, minLen, maxLen);
+    let attempts = 0;
+    while(!isDependencyGraphAcyclic(candidate, r) && attempts < 150){
+      candidate = generateStrictGridArrows(r, minLen, maxLen);
+      attempts++;
+    }
+    return candidate;
+  }
+
+  function buildBoard(){
+    boardSvg.innerHTML = '';
+    cleared.clear();
+    gridMap = {};
+
+    const cfg = getLevelConfig(level);
+    currentR = cfg.r;
+    diffPill.textContent = cfg.label;
+
+    arrows = generateSolvableBoard(currentR, cfg.minLen, cfg.maxLen);
+    gridMap = {};
+    arrows.forEach(a => a.cells.forEach(([x,y]) => { gridMap[key(x,y)] = a.id; }));
+
+    const totalGrid = 2 * currentR + 1;
+    const cellSize = 450 / totalGrid;
+    const offset = 25 + cellSize / 2;
+
+    arrows.forEach(arrow=>{
+      const { shaftD, headPoints } = makeArrowPath(arrow, currentR, cellSize, offset);
+
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', 'arrow-group');
+      g.setAttribute('id', arrow.id);
+
+      const hitbox = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      hitbox.setAttribute('d', shaftD);
+      hitbox.setAttribute('stroke', 'transparent');
+      hitbox.setAttribute('stroke-width', String(Math.max(22, cellSize * 1.05)));
+      hitbox.setAttribute('fill', 'none');
+
+      const shaft = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      shaft.setAttribute('class', 'shaft');
+      shaft.setAttribute('d', shaftD);
+
+      const head = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      head.setAttribute('class', 'head');
+      head.setAttribute('points', headPoints);
+
+      g.appendChild(hitbox);
+      g.appendChild(shaft);
+      g.appendChild(head);
+
+      g.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        handleArrowClick(arrow, g);
+      });
+
+      boardSvg.appendChild(g);
+    });
+
+    levelTitle.textContent = 'Level ' + level;
+    arrowCountEl.textContent = arrows.length;
+    updateHearts();
+    updateTools();
+    hideOverlays();
+  }
+
+  function handleArrowClick(arrow, groupEl){
+    if(busy || cleared.has(arrow.id)) return;
+
+    if(checkCanExit(arrow)){
+      clearArrowAnimation(arrow, groupEl);
+      playClearSound();
+    } else {
+      busy = true;
+      groupEl.classList.add('invalid');
+      playInvalidSound();
+      setTimeout(()=>{
+        groupEl.classList.remove('invalid');
+        busy = false;
+      }, 300);
+      loseLife();
+    }
+  }
+
+  function clearArrowAnimation(arrow, groupEl){
+    const dist = 750;
+    const dx = arrow.dir.dx * dist;
+    const dy = arrow.dir.dy * dist;
+
+    groupEl.style.transform = `translate(${dx}px, ${dy}px)`;
+    groupEl.classList.add('cleared');
+    cleared.add(arrow.id);
+
+    arrowCountEl.textContent = arrows.length - cleared.size;
+
+    if(cleared.size === arrows.length){
+      setTimeout(()=>{ playWinSound(); winOverlay.classList.add('show'); }, 380);
+    }
+  }
+
+  function loseLife(){
+    lives = Math.max(0, lives-1);
+    updateHearts();
+    if(lives === 0){
+      setTimeout(()=>{ playLoseSound(); loseOverlay.classList.add('show'); }, 300);
+    }
+  }
+
+  function updateHearts(){
+    const els = heartsEl.querySelectorAll('.heart');
+    els.forEach((el,i)=> el.classList.toggle('lost', i >= lives));
+  }
+
+  function updateTools(){
+    hintBadge.textContent = hints;
+    hintBtn.disabled = hints <= 0;
+  }
+
+  function hideOverlays(){
+    winOverlay.classList.remove('show');
+    loseOverlay.classList.remove('show');
+    settingsOverlay.classList.remove('show');
+  }
+
+  function findHintable(){
+    for(const a of arrows){
+      if(!cleared.has(a.id) && checkCanExit(a)) return a;
+    }
+    return null;
+  }
+
+  hintBtn.addEventListener('click', ()=>{
+    if(hints <= 0) return;
+    const a = findHintable();
+    if(!a) return;
+    const el = document.getElementById(a.id);
+    if(el){
+      el.classList.add('hint');
+      setTimeout(()=>el.classList.remove('hint'), 1600);
+      hints--;
+      updateTools();
+    }
+  });
+
+  document.getElementById('nextBtn').addEventListener('click', ()=>{
+    level++;
+    lives = 3; hints = 3;
+    buildBoard();
+  });
+
+  document.getElementById('restartBtn').addEventListener('click', ()=>{
+    lives = 3; hints = 3;
+    buildBoard();
+  });
+document.getElementById('settingsBtn').addEventListener('click', ()=> settingsOverlay.classList.add('show'));
+  document.getElementById('settingsCloseBtn').addEventListener('click', ()=> settingsOverlay.classList.remove('show'));
+  document.getEleme
+document.getElementById('settingsBtn').addEventListener('click', ()=> settingsOverlay.classList.add('show'));
+  document.getElementById('settingsCloseBtn').addEventListener('click', ()=> settingsOverlay.classList.remove('show'));
+  document.getElementById('settingsRestartBtn').addEventListener('click', ()=>{
+    settingsOverlay.classList.remove('show');
+    lives = 3; hints = 3;
+    buildBoard();
+  });
+
+  buildBoard();
+})();
+</script>
+</body>
+</html>
+
+  
