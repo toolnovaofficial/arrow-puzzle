@@ -544,6 +544,19 @@ document.getElementById('settingsBtn').addEventListener('click', ()=> settingsOv
   buildBoard();
 })();
 </script>
+   <script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js")
+      .then(() => {
+        console.log("Arrow Puzzle Service Worker registered");
+      })
+      .catch(error => {
+        console.error("Service Worker registration failed:", error);
+      });
+  });
+}
+   </script>
 </body>
 </html>
 
