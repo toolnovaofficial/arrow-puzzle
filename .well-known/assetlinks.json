@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.toolnovaofficial.twa",
+      "sha256_cert_fingerprints": [
+        "24:C4:7C:67:72:F4:F3:97:D2:EC:89:F9:67:E6:56:EC:F1:BA:7E:E9:DE:0B:EC:7B:C4:8A:9B:30:77:C6:AB:2A"
+      ]
+    }
+  }
+]
