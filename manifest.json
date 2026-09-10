@@ -1,6 +1,7 @@
 {
   "name": "Arrow Puzzle",
   "short_name": "Arrow Puzzle",
+  "id": "./",
   "description": "A fun and challenging arrow puzzle game for web and mobile.",
   "start_url": "./",
   "scope": "./",
