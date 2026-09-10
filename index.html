@@ -1,12 +1,8 @@
-   <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-   <link rel="manifest" href="./manifest.json">
-<meta name="theme-color" content="#2f7ff0">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Arrow Puzzle</title>
 <style>
   :root{
@@ -35,7 +31,7 @@
   .heart.lost{opacity:.18;transform:scale(.75);filter:grayscale(1);}
   .board-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:12px;position:relative;}
   #board-svg{width:100%;max-width:440px;height:auto;aspect-ratio:1/1;touch-action:manipulation;overflow:visible;}
-  .arrow-group{cursor:pointer;transition:transform .32s cubic-bezier(.2,1,.4,1), opacity .25s ease;}
+  .arrow-group{cursor:pointer;transition:transform .7s cubic-bezier(.4,0,.2,1), opacity .3s ease .4s;}
   .arrow-group path.shaft{stroke:var(--ink);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;fill:none;}
   .arrow-group polygon.head{fill:var(--ink);stroke:var(--ink);stroke-width:0.6;stroke-linejoin:round;}
   .arrow-group.invalid path.shaft{stroke:var(--ink-blocked);}
@@ -134,11 +130,37 @@
 
   let level = 1, lives = 3, hints = 3;
   let currentR = 5;
+  let currentCellSize = 0, currentOffset = 0;
   let arrows = [];
   let gridMap = {};
   let cleared = new Set();
   let busy = false;
   let soundOn = true;
+
+  // ---- Progress persistence (survives closing/restarting the game) ----
+  const PROGRESS_KEY = 'arrow-puzzle-progress';
+
+  async function saveProgress(){
+    try{
+      if(window.storage && window.storage.set){
+        await window.storage.set(PROGRESS_KEY, JSON.stringify({ level }), false);
+      }
+    }catch(e){ /* storage best-effort, ignore failures */ }
+  }
+
+  async function loadProgress(){
+    try{
+      if(window.storage && window.storage.get){
+        const result = await window.storage.get(PROGRESS_KEY, false);
+        if(result && result.value){
+          const data = JSON.parse(result.value);
+          if(data && typeof data.level === 'number' && data.level >= 1){
+            level = data.level;
+          }
+        }
+      }
+    }catch(e){ /* no saved progress yet, or storage unavailable */ }
+  }
 
   let actx = null;
   function ctx(){
@@ -401,6 +423,8 @@
     const totalGrid = 2 * currentR + 1;
     const cellSize = 450 / totalGrid;
     const offset = 25 + cellSize / 2;
+    currentCellSize = cellSize;
+    currentOffset = offset;
 
     arrows.forEach(arrow=>{
       const { shaftD, headPoints } = makeArrowPath(arrow, currentR, cellSize, offset);
@@ -460,20 +484,82 @@
     }
   }
 
+  // Phase 1: bent shaft smoothly straightens (pivoting from its tail) into a
+  // straight line pointing in arrow.dir. Phase 2: the now-straight arrow slides
+  // off screen in that same direction (CSS transition below, kept in sync here).
+  const STRAIGHTEN_MS = 480;
+  const EXIT_MS = 700;
+
+  function easeInOutCubic(t){
+    return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+  }
+
   function clearArrowAnimation(arrow, groupEl){
-    const dist = 750;
-    const dx = arrow.dir.dx * dist;
-    const dy = arrow.dir.dy * dist;
-
-    groupEl.style.transform = `translate(${dx}px, ${dy}px)`;
-    groupEl.classList.add('cleared');
     cleared.add(arrow.id);
-
     arrowCountEl.textContent = arrows.length - cleared.size;
 
-    if(cleared.size === arrows.length){
-      setTimeout(()=>{ playWinSound(); winOverlay.classList.add('show'); }, 380);
+    const shaftEl = groupEl.querySelector('.shaft');
+    const headEl = groupEl.querySelector('.head');
+
+    // Original bent points, recomputed from the arrow's cells (same formula as makeArrowPath)
+    const origPts = arrow.cells.map(([x,y])=>({
+      x: currentOffset + (x + currentR) * currentCellSize,
+      y: currentOffset + (y + currentR) * currentCellSize
+    }));
+    const { dx, dy } = arrow.dir;
+    const spacing = currentCellSize;
+    const n = origPts.length;
+    const headSize = Math.max(3.8, currentCellSize * 0.24);
+
+    function pointAt(i, e){
+      rget: straight line from the tail (origPts[0]) in the head's direction,
+      // same index-spacing as the original bent path.
+      const tx = origPts[0].x + dx * spacing * i;
+      const ty = origPts[0].y + dy * spacing * i;
+      return {
+        x: origPts[i].x + (tx - origPts[i].x) * e,
+        y: origPts[i].y + (ty - origPts[i].y) * e
+      };
     }
+
+    function renderFrame(e){
+      let d = `M ${origPts[0].x} ${origPts[0].y}`;
+      let last = origPts[0];
+      for(let i=1; i<n; i++){
+        const p = pointAt(i, e);
+        d += ` L ${p.x} ${p.y}`;
+        last = p;
+      }
+      shaftEl.setAttribute('d', d);
+
+      const hx = last.x, hy = last.y;
+      const tipX = hx + dx * (headSize * 1.6);
+      const tipY = hy + dy * (headSize * 1.6);
+      const leftX = hx - dy * headSize;
+      const leftY = hy + dx * headSize;
+      const rightX = hx + dy * headSize;
+      const rightY = hy - dx * headSize;
+      headEl.setAttribute('points', `${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}`);
+    }
+
+    const startTime = performance.now();
+    function step(now){
+      const raw = Math.min(1, (now - startTime) / STRAIGHTEN_MS);
+      renderFrame(easeInOutCubic(raw));
+      if(raw < 1){
+        requestAnimationFrame(step);
+      } else {
+        // Now straight — slide off screen along the head's direction.
+        const dist = 750;
+        groupEl.style.transform = `translate(${dx*dist}px, ${dy*dist}px)`;
+        groupEl.classList.add('cleared');
+
+        if(cleared.size === arrows.length){
+          setTimeout(()=>{ playWinSound(); winOverlay.classList.add('show'); }, EXIT_MS + 60);
+        }
+      }
+    }
+    requestAnimationFrame(step);
   }
 
   function loseLife(){
@@ -523,6 +609,7 @@
   document.getElementById('nextBtn').addEventListener('click', ()=>{
     level++;
     lives = 3; hints = 3;
+    saveProgress();
     buildBoard();
   });
 
@@ -530,34 +617,23 @@
     lives = 3; hints = 3;
     buildBoard();
   });
-document.getElementById('settingsBtn').addEventListener('click', ()=> settingsOverlay.classList.add('show'));
+
+  document.getElementById('settingsBtn').addEventListener('click', ()=> settingsOverlay.classList.add('show'));
   document.getElementById('settingsCloseBtn').addEventListener('click', ()=> settingsOverlay.classList.remove('show'));
-  document.getEleme
-document.getElementById('settingsBtn').addEventListener('click', ()=> settingsOverlay.classList.add('show'));
-  document.getElementById('settingsCloseBtn').addEventListener('click', ()=> settingsOverlay.classList.remove('show'));
+
   document.getElementById('settingsRestartBtn').addEventListener('click', ()=>{
-    settingsOverlay.classList.remove('show');
     lives = 3; hints = 3;
+    settingsOverlay.classList.remove('show');
     buildBoard();
   });
 
-  buildBoard();
+  // ---- Init: load whichever level the player last reached, then build it ----
+  (async function init(){
+    await loadProgress();
+    buildBoard();
+  })();
+
 })();
 </script>
-   <script>
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js")
-      .then(() => {
-        console.log("Arrow Puzzle Service Worker registered");
-      })
-      .catch(error => {
-        console.error("Service Worker registration failed:", error);
-      });
-  });
-}
-   </script>
 </body>
 </html>
-
-  
