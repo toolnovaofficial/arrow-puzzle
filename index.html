@@ -137,31 +137,6 @@
   let busy = false;
   let soundOn = true;
 
-  // ---- Progress persistence (survives closing/restarting the game) ----
-  const PROGRESS_KEY = 'arrow-puzzle-progress';
-
-  async function saveProgress(){
-    try{
-      if(window.storage && window.storage.set){
-        await window.storage.set(PROGRESS_KEY, JSON.stringify({ level }), false);
-      }
-    }catch(e){ /* storage best-effort, ignore failures */ }
-  }
-
-  async function loadProgress(){
-    try{
-      if(window.storage && window.storage.get){
-        const result = await window.storage.get(PROGRESS_KEY, false);
-        if(result && result.value){
-          const data = JSON.parse(result.value);
-          if(data && typeof data.level === 'number' && data.level >= 1){
-            level = data.level;
-          }
-        }
-      }
-    }catch(e){ /* no saved progress yet, or storage unavailable */ }
-  }
-
   let actx = null;
   function ctx(){
     if(!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
@@ -494,74 +469,248 @@
     return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
   }
 
-  function clearArrowAnimation(arrow, groupEl){
-    cleared.add(arrow.id);
-    arrowCountEl.textContent = arrows.length - cleared.size;
+  // Fast-starting curve used ONLY for the translate/exit distance of bent
+  // (90-degree) arrows. easeInOutCubic starts slow, so when it also drove the
+  // exit distance, a long tail spent the first half of EXIT_MS barely moving
+  // and then had to cover most of the distance in the remaining time — on
+  // slower frame rates it could still be inside the visible board when the
+  // animation ended. easeOutCubic moves fast immediately, guaranteeing the
+  // arrow is well clear of the screen before EXIT_MS is up.
+  function easeOutCubic(t){
+    return 1 - Math.pow(1 - t, 3);
+  }
 
-    const shaftEl = groupEl.querySelector('.shaft');
-    const headEl = groupEl.querySelector('.head');
+function clearArrowAnimation(arrow, groupEl){
+  cleared.add(arrow.id);
+  arrowCountEl.textContent = arrows.length - cleared.size;
 
-    // Original bent points, recomputed from the arrow's cells (same formula as makeArrowPath)
-    const origPts = arrow.cells.map(([x,y])=>({
-      x: currentOffset + (x + currentR) * currentCellSize,
-      y: currentOffset + (y + currentR) * currentCellSize
-    }));
-    const { dx, dy } = arrow.dir;
-    const spacing = currentCellSize;
-    const n = origPts.length;
-    const headSize = Math.max(3.8, currentCellSize * 0.24);
+  const shaftEl = groupEl.querySelector('.shaft');
+  const headEl = groupEl.querySelector('.head');
 
-    function pointAt(i, e){
-      rget: straight line from the tail (origPts[0]) in the head's direction,
-      // same index-spacing as the original bent path.
-      const tx = origPts[0].x + dx * spacing * i;
-      const ty = origPts[0].y + dy * spacing * i;
-      return {
-        x: origPts[i].x + (tx - origPts[i].x) * e,
-        y: origPts[i].y + (ty - origPts[i].y) * e
-      };
-    }
+  const origPts = arrow.cells.map(([x,y]) => ({
+    x: currentOffset + (x + currentR) * currentCellSize,
+    y: currentOffset + (y + currentR) * currentCellSize
+  }));
 
-    function renderFrame(e){
-      let d = `M ${origPts[0].x} ${origPts[0].y}`;
-      let last = origPts[0];
-      for(let i=1; i<n; i++){
-        const p = pointAt(i, e);
-        d += ` L ${p.x} ${p.y}`;
-        last = p;
+  const { dx, dy } = arrow.dir;
+  const spacing = currentCellSize;
+  const n = origPts.length;
+  const headSize = Math.max(3.8, currentCellSize * 0.24);
+
+  /*
+    IMPORTANT:
+    L-shaped / 90-degree arrow ke liye bend ko pivot banaya gaya hai.
+    Tail ke last point ko pivot nahi banaya gaya.
+
+    Head exit hona start karega aur usi waqt bend apne actual
+    turning point se gradually straight hoga.
+  */
+
+  Let bendIndex = -1;
+
+  if(n >= 3){
+    for(let i = 1; i < n - 1; i++){
+      const ax = origPts[i].x - origPts[i-1].x;
+      const ay = origPts[i].y - origPts[i-1].y;
+
+      const bx = origPts[i+1].x - origPts[i].x;
+      const by = origPts[i+1].y - origPts[i].y;
+
+      if(ax !== bx || ay !== by){
+        bendIndex = i;
+        break;
       }
-      shaftEl.setAttribute('d', d);
-
-      const hx = last.x, hy = last.y;
-      const tipX = hx + dx * (headSize * 1.6);
-      const tipY = hy + dy * (headSize * 1.6);
-      const leftX = hx - dy * headSize;
-      const leftY = hy + dx * headSize;
-      const rightX = hx + dy * headSize;
-      const rightY = hy - dx * headSize;
-      headEl.setAttribute('points', `${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}`);
     }
+  }
 
+  // Agar bend nahi hai to normal straight exit
+  if(bendIndex === -1){
     const startTime = performance.now();
+    // Straight arrow ke liye bhi tail length ke hisaab se guaranteed clear
+    // distance — lambi seedhi arrow bhi poori tarah bahar nikal jaaye.
+    const clearDistance = 750 + spacing * n;
+
     function step(now){
-      const raw = Math.min(1, (now - startTime) / STRAIGHTEN_MS);
-      renderFrame(easeInOutCubic(raw));
-      if(raw < 1){
+      const t = Math.min(1, (now - startTime) / EXIT_MS);
+      const e = easeOutCubic(t);
+
+      const dist = clearDistance * e;
+      groupEl.style.transform =
+        `translate(${dx * dist}px, ${dy * dist}px)`;
+
+      if(t < 1){
         requestAnimationFrame(step);
-      } else {
-        // Now straight — slide off screen along the head's direction.
-        const dist = 750;
-        groupEl.style.transform = `translate(${dx*dist}px, ${dy*dist}px)`;
+      }else{
         groupEl.classList.add('cleared');
 
         if(cleared.size === arrows.length){
-          setTimeout(()=>{ playWinSound(); winOverlay.classList.add('show'); }, EXIT_MS + 60);
+          setTimeout(()=>{
+            playWinSound();
+            winOverlay.classList.add('show');
+          }, 60);
         }
       }
     }
+
     requestAnimationFrame(step);
+    return;
   }
 
+  const bend = origPts[bendIndex];
+
+  // Tail side ka direction
+  const tailDx =
+    origPts[bendIndex-1].x - bend.x;
+  const tailDy =
+    origPts[bendIndex-1].y - bend.y;
+
+  /*
+    Tail ko bend point ke around rotate karke
+    head ki exit direction ke opposite align karna hai.
+  */
+  const targetTailDx = -dx * spacing;
+  const targetTailDy = -dy * spacing;
+
+  function rotateTailPoint(p, e){
+    const relX = p.x - bend.x;
+    const relY = p.y - bend.y;
+
+    // Original tail vector -> target tail vector
+    const a1 = Math.atan2(relY, relX);
+    const a2 = Math.atan2(targetTailDy, targetTailDx);
+
+    let diff = a2 - a1;
+
+    while(diff > Math.PI) diff -= Math.PI * 2;
+    while(diff < -Math.PI) diff += Math.PI * 2;
+
+    const angle = a1 + diff * e;
+
+    const len = Math.sqrt(relX * relX + relY * relY);
+
+    return {
+      x: bend.x + Math.cos(angle) * len,
+      y: bend.y + Math.sin(angle) * len
+    };
+  }
+
+  /*
+    Head/bend/tail sab saath exit karenge.
+    Bend khud bhi head ke saath move karega.
+  */
+  const startTime = performance.now();
+
+  // Bend se pehle tail kitni lambi ho sakti hai (worst case), taaki exit
+  // distance hamesha usse zyada ho aur tail bhi guaranteed screen ke bahar
+  // nikle — pehle ye fixed 750 tha jo lambi tail ke liye kaafi nahi tha.
+  const clearDistance = 750 + spacing * n;
+
+  function renderFrame(rotE, distE){
+    /*
+      Exit distance:
+      head jaise-jaise screen ke bahar jaata hai,
+      bend bhi usi direction mein move karta hai.
+      distE ek fast-start (ease-out) curve hai taaki translation turant
+      shuru ho jaaye, chahe rotation (rotE) abhi bhi smoothly chal raha ho.
+    */
+    const exitDistance = clearDistance * distE;
+
+    const bendNow = {
+      x: bend.x + dx * exitDistance,
+      y: bend.y + dy * exitDistance
+    };
+
+    let d = '';
+
+    /*
+      Tail points:
+      actual 90-degree bend ko pivot maan kar
+      tail segment isi bend se gradually straight hota hai.
+    */
+    for(let i = 0; i < n; i++){
+
+      let p;
+
+      if(i < bendIndex){
+        const rotated = rotateTailPoint(origPts[i], rotE);
+
+        p = {
+          x: rotated.x + dx * exitDistance,
+          y: rotated.y + dy * exitDistance
+        };
+
+      }else{
+        /*
+          Bend ke baad wale points already head direction mein hain,
+          isliye ye directly head ke saath move karenge.
+        */
+        p = {
+          x: origPts[i].x + dx * exitDistance,
+          y: origPts[i].y + dy * exitDistance
+        };
+      }
+
+      if(i === 0){
+        d = `M ${p.x} ${p.y}`;
+      }else{
+        d += ` L ${p.x} ${p.y}`;
+      }
+
+      // Last point = head
+      if(i === n - 1){
+        const hx = p.x;
+        const hy = p.y;
+
+        const tipX = hx + dx * (headSize * 1.6);
+        const tipY = hy + dy * (headSize * 1.6);
+
+        const leftX = hx - dy * headSize;
+        const leftY = hy + dx * headSize;
+
+        const rightX = hx + dy * headSize;
+        const rightY = hy - dx * headSize;
+
+        headEl.setAttribute(
+          'points',
+          `${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}`
+        );
+      }
+    }
+
+    shaftEl.setAttribute('d', d);
+  }
+
+  function step(now){
+    const raw = Math.min(1, (now - startTime) / EXIT_MS);
+
+    /*
+      Rotation (bend seedha hona) smooth ease-in-out se hota hai, lekin
+      translate/exit distance apne alag, fast-start ease-out curve se chalti
+      hai — isse arrow turant bahar nikalna shuru karta hai aur poore
+      EXIT_MS ke andar guaranteed screen ke bahar chala jaata hai, chahe
+      bend seedha hone mein thoda time le.
+    */
+    const rotE = easeInOutCubic(raw);
+    const distE = easeOutCubic(raw);
+
+    renderFrame(rotE, distE);
+
+    if(raw < 1){
+      requestAnimationFrame(step);
+    }else{
+      groupEl.classList.add('cleared');
+
+      if(cleared.size === arrows.length){
+        setTimeout(()=>{
+          playWinSound();
+          winOverlay.classList.add('show');
+        }, 60);
+      }
+    }
+  }
+
+  requestAnimationFrame(step);
+}
   function loseLife(){
     lives = Math.max(0, lives-1);
     updateHearts();
@@ -609,7 +758,6 @@
   document.getElementById('nextBtn').addEventListener('click', ()=>{
     level++;
     lives = 3; hints = 3;
-    saveProgress();
     buildBoard();
   });
 
@@ -627,9 +775,11 @@
     buildBoard();
   });
 
-  // ---- Init: load whichever level the player last reached, then build it ----
-  (async function init(){
-    await loadProgress();
+  // ---- Init: game restart/reopen par hamesha Level 1 se shuru hoga ----
+  // (Pehle yahan loadProgress() call hoti thi jo last-reached level wapas
+  // load kar deti thi — ab hata di gayi hai taaki close/restart karne par
+  // progress carry na ho aur game hamesha Level 1 se start ho.)
+  (function init(){
     buildBoard();
   })();
 
